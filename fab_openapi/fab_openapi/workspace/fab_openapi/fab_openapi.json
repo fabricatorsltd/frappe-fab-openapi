@@ -1,0 +1,40 @@
+{
+ "app": "fab_openapi",
+ "charts": [],
+ "content": "[{\"id\":\"fab_openapi_header\",\"type\":\"header\",\"data\":{\"text\":\"<span class=\\\"h4\\\">OpenAPI</span>\",\"col\":12}},{\"id\":\"fab_openapi_shortcut_1\",\"type\":\"shortcut\",\"data\":{\"shortcut_name\":\"OpenAPI Connections\",\"col\":3}}]",
+ "creation": "2026-04-27 06:10:00.000000",
+ "custom_blocks": [],
+ "docstatus": 0,
+ "doctype": "Workspace",
+ "for_user": "",
+ "hide_custom": 0,
+ "icon": "network",
+ "idx": 0,
+ "indicator_color": "blue",
+ "is_hidden": 0,
+ "label": "OpenAPI",
+ "links": [],
+ "modified": "2026-04-27 06:10:00.000000",
+ "modified_by": "Administrator",
+ "module": "FAB OpenAPI",
+ "name": "OpenAPI",
+ "number_cards": [],
+ "owner": "Administrator",
+ "parent_page": "",
+ "public": 1,
+ "quick_lists": [],
+ "roles": [],
+ "sequence_id": 23.0,
+ "shortcuts": [
+  {
+   "color": "Blue",
+   "doc_view": "List",
+   "label": "OpenAPI Connections",
+   "link_to": "OpenAPI Connection",
+   "stats_filter": "[]",
+   "type": "DocType"
+  }
+ ],
+ "title": "OpenAPI",
+ "type": "Workspace"
+}

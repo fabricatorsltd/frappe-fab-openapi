@@ -1,0 +1,21 @@
+{
+ "app": "fab_openapi",
+ "creation": "2026-04-27 06:10:00",
+ "docstatus": 0,
+ "doctype": "Desktop Icon",
+ "hidden": 0,
+ "icon": "network",
+ "icon_type": "Link",
+ "idx": 1,
+ "label": "OpenAPI",
+ "link_to": "OpenAPI",
+ "link_type": "Workspace Sidebar",
+ "modified": "2026-04-27 12:32:16.911510",
+ "modified_by": "Administrator",
+ "name": "OpenAPI",
+ "owner": "Administrator",
+ "parent_icon": "FAB",
+ "restrict_removal": 0,
+ "roles": [],
+ "standard": 1
+}

@@ -1,0 +1,18 @@
+# Translations template for FAB OpenAPI.
+# Copyright (C) 2026 fabricators
+# This file is distributed under the same license as the FAB OpenAPI project.
+# FIRST AUTHOR <EMAIL@ADDRESS>, 2026.
+#
+msgid ""
+msgstr ""
+"Project-Id-Version: FAB OpenAPI VERSION\n"
+"Report-Msgid-Bugs-To: support@fabricators.ltd\n"
+"POT-Creation-Date: 2026-04-26 10:37+0000\n"
+"PO-Revision-Date: 2026-04-26 10:37+0000\n"
+"Last-Translator: support@fabricators.ltd\n"
+"Language-Team: support@fabricators.ltd\n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=utf-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+"Generated-By: Babel 2.16.0\n"
+

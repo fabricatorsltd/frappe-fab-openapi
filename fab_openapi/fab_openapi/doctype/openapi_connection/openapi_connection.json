@@ -1,0 +1,199 @@
+{
+ "actions": [],
+ "allow_import": 0,
+ "autoname": "field:connection_name",
+ "creation": "2026-04-26 11:10:00.000000",
+ "doctype": "DocType",
+ "document_type": "Setup",
+ "engine": "InnoDB",
+ "field_order": [
+  "connection_name",
+  "service_type",
+  "column_break_identity",
+  "enabled",
+  "environment",
+  "connection_section",
+  "endpoint_url",
+  "status_url",
+  "column_break_urls",
+  "oauth_token_url",
+  "timeout_seconds",
+  "auth_section",
+  "auth_mode",
+  "account_email",
+  "column_break_auth",
+  "api_key",
+  "access_token",
+  "options_section",
+  "default_apply_signature",
+  "default_apply_legal_storage",
+  "column_break_options",
+  "callback_field",
+  "webhook_auth_header"
+ ],
+ "fields": [
+  {
+   "fieldname": "connection_name",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "Connection Name",
+   "reqd": 1,
+   "unique": 1
+  },
+  {
+   "default": "SDI",
+   "fieldname": "service_type",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "label": "Service Type",
+   "options": "SDI",
+   "reqd": 1
+  },
+  {
+   "fieldname": "column_break_identity",
+   "fieldtype": "Column Break"
+  },
+  {
+   "default": "1",
+   "fieldname": "enabled",
+   "fieldtype": "Check",
+   "label": "Enabled"
+  },
+  {
+   "default": "Production",
+   "fieldname": "environment",
+   "fieldtype": "Select",
+   "label": "Environment",
+   "options": "\nProduction\nSandbox",
+   "reqd": 1
+  },
+  {
+   "fieldname": "connection_section",
+   "fieldtype": "Section Break",
+   "label": "Connection"
+  },
+  {
+   "fieldname": "endpoint_url",
+   "fieldtype": "Data",
+   "label": "Endpoint URL",
+   "reqd": 1
+  },
+  {
+   "fieldname": "status_url",
+   "fieldtype": "Data",
+   "label": "Status URL"
+  },
+  {
+   "fieldname": "column_break_urls",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "oauth_token_url",
+   "fieldtype": "Data",
+   "label": "OAuth Token URL",
+   "reqd": 1
+  },
+  {
+   "default": "30",
+   "fieldname": "timeout_seconds",
+   "fieldtype": "Int",
+   "label": "Timeout Seconds",
+   "reqd": 1
+  },
+  {
+   "fieldname": "auth_section",
+   "fieldtype": "Section Break",
+   "label": "Authentication"
+  },
+  {
+   "default": "OAuth Client Credentials",
+   "fieldname": "auth_mode",
+   "fieldtype": "Select",
+   "label": "Auth Mode",
+   "options": "\nOAuth Client Credentials\nBearer Token",
+   "reqd": 1
+  },
+  {
+   "fieldname": "account_email",
+   "fieldtype": "Data",
+   "label": "Account Email",
+   "depends_on": "eval:doc.auth_mode==\"OAuth Client Credentials\""
+  },
+  {
+   "fieldname": "column_break_auth",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "api_key",
+   "fieldtype": "Password",
+   "label": "API Key",
+   "depends_on": "eval:doc.auth_mode==\"OAuth Client Credentials\""
+  },
+  {
+   "fieldname": "access_token",
+   "fieldtype": "Password",
+   "label": "Access Token",
+   "depends_on": "eval:doc.auth_mode==\"Bearer Token\""
+  },
+  {
+   "fieldname": "options_section",
+   "fieldtype": "Section Break",
+   "label": "OpenAPI Defaults"
+  },
+  {
+   "default": "1",
+   "fieldname": "default_apply_signature",
+   "fieldtype": "Check",
+   "label": "Apply Signature"
+  },
+  {
+   "default": "0",
+   "fieldname": "default_apply_legal_storage",
+   "fieldtype": "Check",
+   "label": "Apply Legal Storage"
+  },
+  {
+   "fieldname": "column_break_options",
+   "fieldtype": "Column Break"
+  },
+  {
+   "default": "data",
+   "fieldname": "callback_field",
+   "fieldtype": "Data",
+   "label": "Callback Field",
+   "reqd": 1
+  },
+  {
+   "fieldname": "webhook_auth_header",
+   "fieldtype": "Data",
+   "label": "Webhook Auth Header"
+  }
+ ],
+ "index_web_pages_for_search": 1,
+ "links": [],
+ "modified": "2026-04-26 11:10:00.000000",
+ "modified_by": "Administrator",
+ "module": "FAB OpenAPI",
+ "name": "OpenAPI Connection",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "System Manager",
+   "share": 1,
+   "write": 1
+  }
+ ],
+ "search_fields": "connection_name,service_type,environment,account_email",
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": [],
+ "title_field": "connection_name",
+ "track_changes": 1
+}
