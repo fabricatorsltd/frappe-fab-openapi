@@ -1,6 +1,6 @@
-# FAB OpenAPI
+# fab OpenAPI
 
-Reusable OpenAPI backend services for FAB and other Frappe apps.
+Reusable OpenAPI backend services for fab and other Frappe apps.
 
 ## Scope
 
@@ -15,7 +15,7 @@ Current responsibilities include:
 - neutral request primitives that domain apps can build on
 
 The app intentionally does **not** own invoice lifecycle, ERPNext custom
-fields, or FAB-specific operator workflows.
+fields, or fab-specific operator workflows.
 
 ## Branches
 
@@ -29,6 +29,15 @@ cd $PATH_TO_YOUR_BENCH
 bench get-app https://github.com/fabricatorsltd/frappe-fab-openapi.git --branch version-16
 bench --site [site] install-app fab_openapi
 ```
+
+## Contributing
+
+Follow the official Frappe contribution guidelines:
+
+- <https://github.com/frappe/erpnext/wiki/Contribution-Guidelines>
+
+Contributions should track the upstream Frappe process for proposals, coding
+standards, pull request quality, and documentation updates.
 
 ## Development
 
