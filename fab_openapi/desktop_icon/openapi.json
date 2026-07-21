@@ -14,7 +14,7 @@
  "modified_by": "Administrator",
  "name": "OpenAPI",
  "owner": "Administrator",
- "parent_icon": "FAB",
+ "parent_icon": "fab",
  "restrict_removal": 0,
  "roles": [],
  "standard": 1
