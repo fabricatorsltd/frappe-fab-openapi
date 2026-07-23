@@ -17,6 +17,18 @@ Current responsibilities include:
 The app intentionally does **not** own invoice lifecycle, ERPNext custom
 fields, or fab-specific operator workflows.
 
+## How it works
+
+- An **OpenAPI Connection** record holds the environment, base URLs, and
+  credentials (Password fields, never plain text). SDI Sandbox and SDI
+  Production records are seeded on install; start every rollout against
+  Sandbox.
+- `clients/sdi.py` wraps the openapi.it SDI API: authentication, token
+  caching, send and receive primitives for FatturaPA payloads.
+- `integrations/fab_italy_edi.py` exposes the client as a transport channel
+  for `fab_italy_edi`, which keeps the invoice lifecycle and operator
+  workflows on its side of the boundary.
+
 ## Branches
 
 - `develop`: integration branch for testing against Frappe/ERPNext `develop`
