@@ -21,6 +21,7 @@ KNOWN_DEFAULT_OAUTH_TOKEN_URLS = {
 class SDIClient:
 	customer_invoice_import_path = "/customer_invoice_imports"
 	invoices_path = "/invoices"
+	invoice_download_path = "/invoices_download/{uuid}"
 	invoices_signature_path = "/invoices_signature"
 	invoices_signature_legal_storage_path = "/invoices_signature_legal_storage"
 	invoice_detail_path = "/invoices/{uuid}"
@@ -86,6 +87,30 @@ class SDIClient:
 			for item in ensure_list(extract_api_data(self.request_json("GET", self.invoices_path, params=params)))
 			if isinstance(item, Mapping)
 		]
+
+	def download_invoice_xml(self, invoice_uuid: str) -> str:
+		"""Fetch the raw FatturaPA XML for an invoice.
+
+		The list endpoint returns a JSON representation; the downstream
+		purchase invoice parser needs the actual XML, which this endpoint
+		serves only when the Accept header asks for it.
+		"""
+		url = self.build_url(self.invoice_download_path.format(uuid=invoice_uuid))
+		headers = {
+			"Accept": "application/xml",
+			"Authorization": self.get_authorization_header((self.invoice_download_path,), method="GET"),
+		}
+		try:
+			response = requests.get(url, headers=headers, timeout=self.get_timeout_seconds())
+		except requests.RequestException as exc:
+			raise ValidationError(_("OpenAPI invoice download failed: {0}").format(exc)) from exc
+		if response.status_code >= 400:
+			raise ValidationError(
+				_("OpenAPI download {0} failed with status {1}: {2}").format(
+					url, response.status_code, response.text[:200]
+				)
+			)
+		return response.text
 
 	def get_invoice(self, invoice_uuid: str) -> dict[str, Any]:
 		payload = self.request_json(

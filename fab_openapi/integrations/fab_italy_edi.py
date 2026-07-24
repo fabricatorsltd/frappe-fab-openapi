@@ -126,7 +126,19 @@ class OpenAPITransportBackend:
 	def list_incoming_invoices(self, configuration, provider) -> list[dict[str, Any]]:
 		client = self.get_client(provider)
 		params = {"downloaded": "false", "type": "1", "recipient": ",".join(self.get_recipient_values(configuration))}
-		return [self.normalize_supplier_invoice(item) for item in client.list_invoices(params=params)]
+		invoices = []
+		for item in client.list_invoices(params=params):
+			normalized = self.normalize_supplier_invoice(item)
+			# the list payload is a JSON view; the purchase invoice parser
+			# needs the real FatturaPA XML, fetched per document
+			invoice_uuid = normalize_identifier(item.get("uuid"))
+			if invoice_uuid:
+				try:
+					normalized["payload"] = client.download_invoice_xml(invoice_uuid)
+				except Exception:
+					pass
+			invoices.append(normalized)
+		return invoices
 
 	def normalize_outbound_invoice(self, invoice: Mapping[str, Any]) -> dict[str, Any]:
 		receipt_state = self.normalize_invoice_marking(invoice.get("marking"), invoice.get("notice"))
