@@ -137,6 +137,57 @@ class TestSDIClient(unittest.TestCase):
 
 		self.assertEqual(client.get_authorization_header((SDIClient.invoices_path,), method="GET"), "Bearer secret-token")
 
+	def _oauth_connection(self):
+		return SimpleNamespace(
+			connection_name="SDI Production",
+			environment="Production",
+			endpoint_url="https://sdi.openapi.it",
+			status_url="https://sdi.openapi.it",
+			oauth_token_url="https://oauth.openapi.it/token",
+			auth_mode="OAuth Client Credentials",
+			account_email="billing@example.com",
+			access_token_expiry=None,
+			get_password=lambda fieldname: "api-key" if fieldname == "api_key" else None,
+			timeout_seconds=30,
+			default_apply_signature=1,
+			default_apply_legal_storage=0,
+		)
+
+	def test_client_credentials_token_is_reused_across_calls(self):
+		client = SDIClient(self._oauth_connection())
+
+		with patch.object(client, "fetch_access_token", return_value=("shared-token", {})) as fetch:
+			first = client.get_authorization_header((SDIClient.invoices_path,), method="GET")
+			second = client.get_authorization_header((SDIClient.invoices_notifications_path,), method="POST")
+
+		self.assertEqual(first, "Bearer shared-token")
+		self.assertEqual(second, "Bearer shared-token")
+		fetch.assert_called_once()
+
+	def test_full_scope_value_covers_every_operation(self):
+		client = SDIClient(self._oauth_connection())
+
+		scope = client.full_scope_value()
+
+		for expected in (
+			"GET:sdi.openapi.it/invoices",
+			"POST:sdi.openapi.it/invoices_signature",
+			"GET:sdi.openapi.it/invoices_notifications",
+			"GET:sdi.openapi.it/invoices_download",
+		):
+			self.assertIn(expected, scope)
+
+	def test_extract_token_expiry_reads_payload_then_jwt(self):
+		from fab_openapi.clients.sdi import extract_token_expiry
+
+		self.assertIsNotNone(extract_token_expiry({"expire": 4102444800}, "opaque"))
+		import base64
+		import json
+
+		body = base64.urlsafe_b64encode(json.dumps({"exp": 4102444800}).encode()).decode().rstrip("=")
+		self.assertIsNotNone(extract_token_expiry({}, f"header.{body}.signature"))
+		self.assertIsNone(extract_token_expiry({}, "not-a-jwt"))
+
 	def test_oauth_mode_requires_account_email_and_api_key(self):
 		client = SDIClient(
 			SimpleNamespace(

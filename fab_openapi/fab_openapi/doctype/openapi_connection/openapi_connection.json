@@ -24,6 +24,7 @@
   "column_break_auth",
   "api_key",
   "access_token",
+  "access_token_expiry",
   "options_section",
   "default_apply_signature",
   "default_apply_legal_storage",
@@ -134,6 +135,14 @@
    "fieldtype": "Password",
    "label": "Access Token",
    "depends_on": "eval:doc.auth_mode==\"Bearer Token\""
+  },
+  {
+   "fieldname": "access_token_expiry",
+   "fieldtype": "Datetime",
+   "label": "Access Token Expiry",
+   "read_only": 1,
+   "hidden": 1,
+   "description": "Managed automatically: expiry of the cached OAuth token so it is reused instead of minted per request."
   },
   {
    "fieldname": "options_section",

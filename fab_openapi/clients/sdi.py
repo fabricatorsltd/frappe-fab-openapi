@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import base64
 import json
+from datetime import datetime
 from typing import Any, Iterable, Mapping
 from urllib.parse import urlparse
 
@@ -8,7 +10,8 @@ import frappe
 import requests
 from frappe import _
 from frappe.exceptions import ValidationError
-from frappe.utils import cint
+from frappe.utils import add_to_date, cint, get_datetime, now_datetime
+from frappe.utils.password import set_encrypted_password
 
 KNOWN_DEFAULT_OAUTH_TOKEN_URLS = {
 	"https://console.openapi.com/apis/oauth/token",
@@ -16,6 +19,11 @@ KNOWN_DEFAULT_OAUTH_TOKEN_URLS = {
 	"https://oauth.openapi.it/token",
 	"https://test.oauth.openapi.it/token",
 }
+
+# reuse a minted OAuth token until it nears expiry instead of minting per request;
+# re-mint this many seconds early, and assume this lifetime when the provider omits one
+TOKEN_EXPIRY_SKEW_SECONDS = 300
+TOKEN_FALLBACK_LIFETIME_SECONDS = 7 * 24 * 3600
 
 
 class SDIClient:
@@ -32,7 +40,7 @@ class SDIClient:
 
 	def __init__(self, connection: str | Mapping[str, Any] | Any):
 		self.connection = get_connection_document(connection)
-		self._token_cache: dict[str, str] = {}
+		self._shared_token: str | None = None
 
 	@classmethod
 	def from_connection_name(cls, connection_name: str) -> "SDIClient":
@@ -96,14 +104,21 @@ class SDIClient:
 		serves only when the Accept header asks for it.
 		"""
 		url = self.build_url(self.invoice_download_path.format(uuid=invoice_uuid))
-		headers = {
-			"Accept": "application/xml",
-			"Authorization": self.get_authorization_header((self.invoice_download_path,), method="GET"),
-		}
-		try:
-			response = requests.get(url, headers=headers, timeout=self.get_timeout_seconds())
-		except requests.RequestException as exc:
-			raise ValidationError(_("OpenAPI invoice download failed: {0}").format(exc)) from exc
+		for attempt in range(2):
+			headers = {
+				"Accept": "application/xml",
+				"Authorization": self.get_authorization_header(
+					(self.invoice_download_path,), method="GET", force_refresh=attempt > 0
+				),
+			}
+			try:
+				response = requests.get(url, headers=headers, timeout=self.get_timeout_seconds())
+			except requests.RequestException as exc:
+				raise ValidationError(_("OpenAPI invoice download failed: {0}").format(exc)) from exc
+			if self._should_retry_auth(response.status_code, attempt):
+				self.invalidate_access_token()
+				continue
+			break
 		if response.status_code >= 400:
 			raise ValidationError(
 				_("OpenAPI download {0} failed with status {1}: {2}").format(
@@ -258,25 +273,33 @@ class SDIClient:
 		json_data: Mapping[str, Any] | None = None,
 		content_type: str | None = None,
 	) -> dict[str, Any]:
-		headers = {
-			"Accept": "application/json",
-			"Authorization": self.get_authorization_header(scope_paths or (path,), method=method),
-		}
-		if content_type:
-			headers["Content-Type"] = content_type
+		for attempt in range(2):
+			headers = {
+				"Accept": "application/json",
+				"Authorization": self.get_authorization_header(
+					scope_paths or (path,), method=method, force_refresh=attempt > 0
+				),
+			}
+			if content_type:
+				headers["Content-Type"] = content_type
 
-		try:
-			response = requests.request(
-				method=method,
-				url=self.build_url(path),
-				params=params,
-				data=data,
-				json=json_data,
-				headers=headers,
-				timeout=self.get_timeout_seconds(),
-			)
-		except requests.RequestException as exc:
-			raise ValidationError(_("OpenAPI request failed: {0}").format(exc)) from exc
+			try:
+				response = requests.request(
+					method=method,
+					url=self.build_url(path),
+					params=params,
+					data=data,
+					json=json_data,
+					headers=headers,
+					timeout=self.get_timeout_seconds(),
+				)
+			except requests.RequestException as exc:
+				raise ValidationError(_("OpenAPI request failed: {0}").format(exc)) from exc
+
+			if self._should_retry_auth(response.status_code, attempt):
+				self.invalidate_access_token()
+				continue
+			break
 
 		payload = parse_json_response(response)
 		if response.status_code >= 400:
@@ -295,10 +318,12 @@ class SDIClient:
 
 		return payload
 
-	def get_authorization_header(self, scope_paths: Iterable[str], method: str = "GET") -> str:
+	def get_authorization_header(
+		self, scope_paths: Iterable[str], method: str = "GET", force_refresh: bool = False
+	) -> str:
 		auth_mode = (get_document_value(self.connection, "auth_mode") or "OAuth Client Credentials").strip()
 		if auth_mode == "Bearer Token":
-			access_token = get_document_secret(self.connection, "access_token")
+			access_token = get_optional_document_secret(self.connection, "access_token")
 			if not access_token:
 				raise ValidationError(
 					_("OpenAPI Access Token is missing on connection {0}.").format(
@@ -307,14 +332,43 @@ class SDIClient:
 				)
 			return f"Bearer {access_token}"
 
-		scope_value = self.build_scope_value(scope_paths, method=method)
-		if scope_value not in self._token_cache:
-			self._token_cache[scope_value] = self.request_access_token(scope_value)
-		return f"Bearer {self._token_cache[scope_value]}"
+		# OAuth client-credentials: one token minted for the union of every operation
+		# scope, reused until it nears expiry, so we do not mint a fresh token per call
+		return f"Bearer {self.get_client_credentials_token(force_refresh=force_refresh)}"
+
+	def uses_client_credentials(self) -> bool:
+		auth_mode = (get_document_value(self.connection, "auth_mode") or "OAuth Client Credentials").strip()
+		return auth_mode != "Bearer Token"
+
+	def get_client_credentials_token(self, force_refresh: bool = False) -> str:
+		if not force_refresh:
+			if self._shared_token:
+				return self._shared_token
+			stored = get_optional_document_secret(self.connection, "access_token")
+			if stored and not self.stored_token_expired():
+				self._shared_token = stored
+				return stored
+		self._shared_token = self.mint_access_token()
+		return self._shared_token
+
+	def stored_token_expired(self) -> bool:
+		expiry = get_document_value(self.connection, "access_token_expiry")
+		if not expiry:
+			return True
+		return get_datetime(expiry) <= now_datetime()
+
+	def mint_access_token(self) -> str:
+		token, payload = self.fetch_access_token(self.full_scope_value())
+		self.store_access_token(token, self.resolve_token_expiry(payload, token))
+		return token
 
 	def request_access_token(self, scope_value: str) -> str:
+		token, _payload = self.fetch_access_token(scope_value)
+		return token
+
+	def fetch_access_token(self, scope_value: str) -> tuple[str, dict[str, Any]]:
 		account_email = normalize_identifier(get_document_value(self.connection, "account_email"))
-		api_key = get_document_secret(self.connection, "api_key")
+		api_key = get_optional_document_secret(self.connection, "api_key")
 		if not account_email or not api_key:
 			raise ValidationError(
 				_("OpenAPI connection {0} requires Account Email and API Key before OAuth can run.").format(
@@ -345,7 +399,58 @@ class SDIClient:
 		access_token = payload.get("token") if isinstance(payload, dict) else None
 		if not access_token:
 			raise ValidationError(_("OpenAPI token response did not include a token."))
-		return access_token
+		return access_token, payload if isinstance(payload, dict) else {}
+
+	def full_scope_value(self) -> str:
+		host = urlparse(self.get_status_url()).netloc
+		scopes = {
+			f"{method.upper()}:{host}{normalize_scope_path(path)}"
+			for method, path in self.token_scope_requests()
+		}
+		return " ".join(sorted(scopes))
+
+	def token_scope_requests(self) -> tuple[tuple[str, str], ...]:
+		return (
+			("POST", self.invoices_signature_path),
+			("POST", self.invoices_signature_legal_storage_path),
+			("POST", self.invoices_path),
+			("GET", self.invoices_path),
+			("GET", self.invoices_notifications_path),
+			("GET", self.invoice_download_path),
+			("GET", self.business_registry_configuration_path),
+			("POST", self.business_registry_configuration_path),
+			("GET", self.api_configuration_path),
+			("POST", self.api_configuration_path),
+			("POST", self.customer_invoice_import_path),
+		)
+
+	def store_access_token(self, token: str, expiry: Any) -> None:
+		name = get_document_value(self.connection, "name")
+		if not name or isinstance(self.connection, Mapping):
+			return
+		set_encrypted_password("OpenAPI Connection", name, token, "access_token")
+		frappe.db.set_value(
+			"OpenAPI Connection", name, "access_token_expiry", expiry, update_modified=False
+		)
+		if hasattr(self.connection, "access_token_expiry"):
+			self.connection.access_token_expiry = expiry
+
+	def invalidate_access_token(self) -> None:
+		self._shared_token = None
+		name = get_document_value(self.connection, "name")
+		if name and not isinstance(self.connection, Mapping):
+			frappe.db.set_value(
+				"OpenAPI Connection", name, "access_token_expiry", None, update_modified=False
+			)
+
+	def resolve_token_expiry(self, payload: Mapping[str, Any], token: str) -> Any:
+		expiry = extract_token_expiry(payload, token)
+		if expiry:
+			return add_to_date(expiry, seconds=-TOKEN_EXPIRY_SKEW_SECONDS)
+		return add_to_date(now_datetime(), seconds=TOKEN_FALLBACK_LIFETIME_SECONDS)
+
+	def _should_retry_auth(self, status_code: int, attempt: int) -> bool:
+		return status_code in (401, 403) and attempt == 0 and self.uses_client_credentials()
 
 	def build_scope_value(self, scope_paths: Iterable[str], method: str = "GET") -> str:
 		host = urlparse(self.get_status_url()).netloc
@@ -378,6 +483,24 @@ def get_document_secret(document: Mapping[str, Any] | Any, fieldname: str) -> st
 	get_password = getattr(document, "get_password", None)
 	if callable(get_password):
 		return normalize_identifier(get_password(fieldname))
+	return normalize_identifier(getattr(document, fieldname, None))
+
+
+def get_optional_document_secret(document: Mapping[str, Any] | Any, fieldname: str) -> str | None:
+	"""Like get_document_secret but returns None instead of raising when the
+	encrypted field has never been set (the normal state before the first mint)."""
+	if isinstance(document, Mapping):
+		return normalize_identifier(document.get(fieldname))
+	get_password = getattr(document, "get_password", None)
+	if callable(get_password):
+		try:
+			return normalize_identifier(get_password(fieldname, raise_exception=False))
+		except TypeError:
+			# test doubles whose get_password takes only the fieldname
+			try:
+				return normalize_identifier(get_password(fieldname))
+			except Exception:
+				return None
 	return normalize_identifier(getattr(document, fieldname, None))
 
 
@@ -455,6 +578,43 @@ def normalize_vat_code(value: Any) -> str | None:
 def normalize_scope_path(path: str) -> str:
 	base_path = path.split("/{", 1)[0]
 	return base_path.rstrip("/") or "/"
+
+
+def extract_token_expiry(payload: Mapping[str, Any], token: str) -> Any:
+	"""Best-effort expiry for a minted token: the provider payload first, then the
+	token's own JWT `exp`. None when neither is available (caller falls back)."""
+	if isinstance(payload, Mapping):
+		for key in ("expire", "expiration", "expires_at", "expires", "exp"):
+			expiry = coerce_epoch_or_datetime(payload.get(key))
+			if expiry:
+				return expiry
+	return jwt_expiry(token)
+
+
+def coerce_epoch_or_datetime(value: Any) -> Any:
+	if not value:
+		return None
+	if isinstance(value, (int, float)) or (isinstance(value, str) and value.isdigit()):
+		try:
+			return get_datetime(datetime.fromtimestamp(int(value)))
+		except (ValueError, OverflowError, OSError):
+			return None
+	try:
+		return get_datetime(value)
+	except (ValueError, TypeError):
+		return None
+
+
+def jwt_expiry(token: str) -> Any:
+	parts = token.split(".") if isinstance(token, str) else []
+	if len(parts) != 3:
+		return None
+	try:
+		segment = parts[1] + "=" * (-len(parts[1]) % 4)
+		claims = json.loads(base64.urlsafe_b64decode(segment.encode("ascii")))
+	except (ValueError, TypeError):
+		return None
+	return coerce_epoch_or_datetime(claims.get("exp")) if isinstance(claims, dict) else None
 
 
 def openapi_fiscal_ids_match_exactly(candidate: Any, expected: str | None) -> bool:
