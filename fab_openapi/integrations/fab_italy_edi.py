@@ -149,10 +149,13 @@ class OpenAPITransportBackend:
 					continue  # uuid-less items cannot be fetched/deduped: skip them
 				seen.add(uuid)
 				fresh.append((uuid, item))
+			# stop when a page brings no new uuid. Correct for both API contracts as
+			# long as page ordering is stable/contiguous (real SDI listings are):
+			# paginating -> empty tail page; ignoring `page` -> page 2 repeats page 1
 			if not fresh:
 				break
 			already = self.existing_edi_document_uuids(
-				company, provider_name, [uuid for uuid, _ in fresh]
+				company, provider_name, [pair[0] for pair in fresh]
 			)
 			for uuid, item in fresh:
 				if uuid in already:
