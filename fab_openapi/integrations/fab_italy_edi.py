@@ -123,22 +123,74 @@ class OpenAPITransportBackend:
 				notifications.append(dict(reference))
 		return notifications
 
+	# safety cap on paged listing, so a misread pagination contract can never loop
+	INCOMING_MAX_PAGES = 200
+
 	def list_incoming_invoices(self, configuration, provider) -> list[dict[str, Any]]:
 		client = self.get_client(provider)
-		params = {"downloaded": "false", "type": "1", "recipient": ",".join(self.get_recipient_values(configuration))}
-		invoices = []
-		for item in client.list_invoices(params=params):
-			normalized = self.normalize_supplier_invoice(item)
-			# the list payload is a JSON view; the purchase invoice parser
-			# needs the real FatturaPA XML, fetched per document
-			invoice_uuid = normalize_identifier(item.get("uuid"))
-			if invoice_uuid:
+		company = self.get_document_value(configuration, "company")
+		provider_name = self.get_document_value(provider, "name")
+		recipient = ",".join(self.get_recipient_values(configuration))
+		# Do not filter on OpenAPI's `downloaded` flag: it flips at download time,
+		# not at import, so a download that later fails to import would be lost.
+		# We decide what to fetch from our own ledger (EDI Document) instead, so a
+		# failed import is retried next run rather than silently dropped. Listing is
+		# free (GET /invoices); we page through it defensively: dedup by uuid and
+		# stop when a page brings nothing new, which is correct whether the API
+		# paginates or ignores the page param (then page 2 repeats page 1 -> stop).
+		invoices: list[dict[str, Any]] = []
+		seen: set[str] = set()
+		for page in range(1, self.INCOMING_MAX_PAGES + 1):
+			rows = client.list_invoices(params={"type": "1", "recipient": recipient, "page": page})
+			fresh = []
+			for item in rows:
+				uuid = normalize_identifier(item.get("uuid"))
+				if not uuid or uuid in seen:
+					continue  # uuid-less items cannot be fetched/deduped: skip them
+				seen.add(uuid)
+				fresh.append((uuid, item))
+			if not fresh:
+				break
+			already = self.existing_edi_document_uuids(
+				company, provider_name, [uuid for uuid, _ in fresh]
+			)
+			for uuid, item in fresh:
+				if uuid in already:
+					continue
+				normalized = self.normalize_supplier_invoice(item)
+				# the list payload is a JSON view; the purchase invoice parser needs
+				# the real FatturaPA XML, fetched per document (a paid call)
 				try:
-					normalized["payload"] = client.download_invoice_xml(invoice_uuid)
-				except Exception:
-					pass
-			invoices.append(normalized)
+					normalized["payload"] = client.download_invoice_xml(uuid)
+				except Exception as exc:
+					# keep the failure visible and skip this one; with no EDI
+					# Document created it is retried next run, not lost
+					frappe.log_error(
+						title="OpenAPI incoming invoice download failed",
+						message=f"uuid={uuid}: {exc}",
+					)
+					continue
+				invoices.append(normalized)
 		return invoices
+
+	def existing_edi_document_uuids(self, company, provider_name, uuids: list[str]) -> set[str]:
+		"""Our own 'do we have it?' ledger, batched: the subset of uuids that already
+		have an EDI Document for this company/provider (same key as the upsert dedup),
+		so those paid downloads are skipped."""
+		if not uuids:
+			return set()
+		return set(
+			frappe.get_all(
+				"EDI Document",
+				filters={
+					"external_submission_id": ["in", uuids],
+					"document_kind": "supplier_invoice_import",
+					"company": company,
+					"provider": provider_name,
+				},
+				pluck="external_submission_id",
+			)
+		)
 
 	def normalize_outbound_invoice(self, invoice: Mapping[str, Any]) -> dict[str, Any]:
 		receipt_state = self.normalize_invoice_marking(invoice.get("marking"), invoice.get("notice"))
