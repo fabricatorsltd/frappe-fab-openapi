@@ -11,7 +11,7 @@ import requests
 from frappe import _
 from frappe.exceptions import ValidationError
 from frappe.utils import add_to_date, cint, get_datetime, now_datetime
-from frappe.utils.password import set_encrypted_password
+from frappe.utils.password import get_decrypted_password, set_encrypted_password
 
 KNOWN_DEFAULT_OAUTH_TOKEN_URLS = {
 	"https://console.openapi.com/apis/oauth/token",
@@ -344,15 +344,41 @@ class SDIClient:
 		if not force_refresh:
 			if self._shared_token:
 				return self._shared_token
-			stored = get_optional_document_secret(self.connection, "access_token")
-			if stored and not self.stored_token_expired():
+			stored, expiry = self.read_stored_token()
+			if stored and expiry and get_datetime(expiry) > now_datetime():
 				self._shared_token = stored
 				return stored
 		self._shared_token = self.mint_access_token()
 		return self._shared_token
 
+	def db_connection_name(self) -> str | None:
+		"""OpenAPI Connection docname to persist the token against. The adapter builds
+		the client from a settings dict (not the doc), so we key off connection_name to
+		keep one shared token in the DB across every call instead of minting each time."""
+		if isinstance(self.connection, Mapping):
+			return normalize_identifier(self.connection.get("connection_name")) or normalize_identifier(
+				self.connection.get("name")
+			)
+		return get_document_value(self.connection, "name") or normalize_identifier(
+			get_document_value(self.connection, "connection_name")
+		)
+
+	def read_stored_token(self) -> tuple[str | None, Any]:
+		"""Token + expiry from the OpenAPI Connection row: the source of truth whether
+		the client was built from the doc or from a settings dict."""
+		name = self.db_connection_name()
+		if name and frappe.db.exists("OpenAPI Connection", name):
+			token = get_decrypted_password(
+				"OpenAPI Connection", name, "access_token", raise_exception=False
+			)
+			expiry = frappe.db.get_value("OpenAPI Connection", name, "access_token_expiry")
+			return normalize_identifier(token), expiry
+		return get_optional_document_secret(self.connection, "access_token"), get_document_value(
+			self.connection, "access_token_expiry"
+		)
+
 	def stored_token_expired(self) -> bool:
-		expiry = get_document_value(self.connection, "access_token_expiry")
+		_token, expiry = self.read_stored_token()
 		if not expiry:
 			return True
 		return get_datetime(expiry) <= now_datetime()
@@ -425,23 +451,25 @@ class SDIClient:
 		)
 
 	def store_access_token(self, token: str, expiry: Any) -> None:
-		name = get_document_value(self.connection, "name")
-		if not name or isinstance(self.connection, Mapping):
+		name = self.db_connection_name()
+		if not name or not frappe.db.exists("OpenAPI Connection", name):
 			return
 		set_encrypted_password("OpenAPI Connection", name, token, "access_token")
 		frappe.db.set_value(
 			"OpenAPI Connection", name, "access_token_expiry", expiry, update_modified=False
 		)
-		if hasattr(self.connection, "access_token_expiry"):
-			self.connection.access_token_expiry = expiry
+		# persist now: the polling job / web request may not commit, and without this
+		# the token never lands in the DB so every run mints a fresh one
+		frappe.db.commit()
 
 	def invalidate_access_token(self) -> None:
 		self._shared_token = None
-		name = get_document_value(self.connection, "name")
-		if name and not isinstance(self.connection, Mapping):
+		name = self.db_connection_name()
+		if name and frappe.db.exists("OpenAPI Connection", name):
 			frappe.db.set_value(
 				"OpenAPI Connection", name, "access_token_expiry", None, update_modified=False
 			)
+			frappe.db.commit()
 
 	def resolve_token_expiry(self, payload: Mapping[str, Any], token: str) -> Any:
 		expiry = extract_token_expiry(payload, token)
