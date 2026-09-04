@@ -47,8 +47,9 @@
    "fieldtype": "Select",
    "in_list_view": 1,
    "label": "Service Type",
-   "options": "SDI",
-   "reqd": 1
+   "options": "SDI\neSignature",
+   "reqd": 1,
+   "description": "Which OpenAPI service this connection reaches. The account is the same for all of them; the endpoint and the token scopes are not."
   },
   {
    "fieldname": "column_break_identity",
@@ -147,7 +148,8 @@
   {
    "fieldname": "options_section",
    "fieldtype": "Section Break",
-   "label": "OpenAPI Defaults"
+   "label": "OpenAPI Defaults",
+   "depends_on": "eval:doc.service_type==\"SDI\""
   },
   {
    "default": "1",
